@@ -94,7 +94,7 @@ cashere-pos/
 
 Clone the Repository:
 ```bash
-git clone https://github.com/<username>/cashere-pos.git
+git clone https://github.com/MozartKato/cashere-pos.git
 cd cashere-pos
 ```
 
