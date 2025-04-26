@@ -1,151 +1,208 @@
-Cashere POS
+# Cashere POS
 
-A Flutter-based Point of Sale (POS) application for managing products and transactions. Features a modern, responsive UI with multi-language support, transaction history, and CSV export.
-📋 Features
+A modern Flutter-based Point of Sale (POS) application for managing products and transactions with a responsive UI, multi-language support, and advanced transaction history features.
 
-Product Management: Add, edit, and view products (name, price, quantity, category).
-Transaction Handling: Create multi-product transactions, select payment methods (Cash, Card, QRIS), and manage cart.
-Transaction History: View grouped transactions with search, filter (date, payment method, category), sort (date, total), and export to CSV.
-Localization: Supports English and Indonesian via LocaleProvider.
-Currency Formatting: Dynamic currency formatting with CurrencyProvider.
-Database: SQLite for persistent storage using sqflite.
-UI/UX: Clean, animated, responsive design with soft shadows, rounded corners, and smooth transitions.
+---
 
-🛠 Tech Stack
+## ✨ Features
 
-Framework: Flutter (Dart)
-Database: SQLite (sqflite)
-State Management: Provider
-Key Dependencies:
-provider: ^6.1.2
-sqflite: ^2.3.3
-path_provider: ^2.1.4
-uuid: ^4.4.0
-intl: ^0.18.1
-csv: ^6.0.0
-open_file: ^3.3.2
+### Product Management
+- Add, edit, and delete products.
+- Track name, price, quantity, and category.
 
+### Transaction Handling
+- Create transactions with multiple products.
+- Choose payment methods: Cash, Card, QRIS.
+- Real-time cart with total price calculation.
 
+### Transaction History
+- View grouped transactions with details.
+- Search by transaction ID, product, or category.
+- Filter by date range, payment method, or category.
+- Sort by date (newest/oldest) or total (high/low).
+- Export to CSV in `/Download`.
 
-📁 Project Structure
+### Localization
+- Supports English and Indonesian.
+- Dynamic UI based on `LocaleProvider`.
+
+### Currency Formatting
+- Customizable formatting via `CurrencyProvider`.
+
+### UI/UX
+- Clean, animated, and responsive design.
+- Soft shadows, rounded corners, and smooth transitions.
+
+---
+
+## 🛠 Tech Stack
+
+| Component | Technology |
+|:---------|:-----------|
+| Framework | Flutter (Dart) |
+| Database | SQLite (sqflite) |
+| State Management | Provider |
+| Dependencies | See table below |
+
+### Key Dependencies
+
+| Package | Version | Purpose |
+|:--------|:--------|:--------|
+| provider | ^6.1.2 | State management |
+| sqflite | ^2.3.3 | SQLite database |
+| path_provider | ^2.1.4 | File system access |
+| uuid | ^4.4.0 | Unique ID generation |
+| intl | ^0.18.1 | Date and currency formatting |
+| csv | ^6.0.0 | CSV export |
+| open_file | ^3.3.2 | Open exported files |
+
+---
+
+## 📁 Project Structure
+
+```
 cashere-pos/
 ├── lib/
 │   ├── helper/
 │   │   └── database_helper.dart       # SQLite database operations
 │   ├── models/
-│   │   ├── product.dart              # Product model
-│   │   ├── transaction.dart          # Transaction model
-│   │   └── category.dart             # Category model
+│   │   ├── product.dart               # Product model
+│   │   ├── transaction.dart           # Transaction model
+│   │   └── category.dart              # Category model
 │   ├── providers/
-│   │   ├── locale_provider.dart      # Language management
-│   │   └── currency_provider.dart    # Currency formatting
+│   │   ├── locale_provider.dart       # Language management
+│   │   └── currency_provider.dart     # Currency formatting
 │   ├── screens/
-│   │   ├── transaction_screen.dart   # Transaction creation UI
+│   │   ├── transaction_screen.dart    # Transaction creation UI
 │   │   └── transaction_history_screen.dart # Transaction history UI
-│   └── main.dart                     # App entry point
-├── LICENSE                           # MIT License
-├── README.md                         # Project documentation
-└── pubspec.yaml                      # Dependencies and config
+│   └── main.dart                      # App entry point
+├── LICENSE                             # MIT License
+├── README.md                           # Project documentation
+└── pubspec.yaml                        # Dependencies and config
+```
 
-🚀 Getting Started
-Prerequisites
+---
 
-Flutter SDK: Install
-Git: Install
-Android Studio or VS Code
+## 🚀 Getting Started
 
-Installation
+### Prerequisites
+- Flutter SDK (v3.16+)
+- Git
+- Android Studio or VS Code
+
+### Installation
 
 Clone the Repository:
+```bash
 git clone https://github.com/<username>/cashere-pos.git
 cd cashere-pos
-
+```
 
 Install Dependencies:
+```bash
 flutter pub get
-
+```
 
 Run the App:
+```bash
 flutter run
-
+```
 
 Build for Release:
+```bash
 flutter build apk --release
+```
 
+---
 
+## 🗄 Database
 
-🗄 Database
+**Schema:**
+- `products`: id, name, price, quantity, category
+- `transactions`: transaction_id, product_id, quantity, total_price, transaction_date, payment_method
+- `categories`: name
 
-Schema:
-products: id, name, price, quantity, category
-transactions: transaction_id, product_id, quantity, total_price, transaction_date, payment_method
-categories: name
+**Location:**  
+`/data/data/com.twohead.cashere/databases/cashere.db`
 
+**Debugging:**  
+```bash
+adb pull /data/data/com.twohead.cashere/databases/cashere.db
+```
 
-Location: /data/data/com.twohead.cashere/databases/cashere.db
-Debugging:adb pull /data/data/com.twohead.cashere/databases/cashere.db
+---
 
+## 🎮 Usage
 
+### Transaction Screen
+- Add products to cart and adjust quantities.
+- Select payment method (Cash, Card, QRIS).
+- View real-time cart total and checkout.
 
-🎮 Usage
-Transaction Screen
+### Transaction History Screen
+- View grouped transactions with full details.
+- **Search:** Filter by transaction ID, product, or category.
+- **Filter:** By date range, payment method, or category.
+- **Sort:** By date or total.
+- **Export:** Save history as CSV to `/Download`.
 
-Add products to cart, adjust quantities, and select payment method (Cash, Card, QRIS).
-View real-time cart total and checkout.
-Supports multiple products per transaction.
+---
 
-Transaction History Screen
+## 🧪 Testing
 
-View grouped transactions with details (ID, date, payment method, products, total).
-Search: By transaction ID, product name, or category.
-Filter: By date range, payment method, or product category.
-Sort: By date (newest/oldest) or total (high/low).
-Export: Save history as CSV to /Download.
+- **UI:** Verify animations, responsiveness, and fonts (Roboto, 14sp/12sp).
+- **Functionality:** Test cart operations and checkout with various payment methods. Validate search, filter, sort, and CSV export.
+- **Performance:** Test with 100+ transactions for smooth scrolling. Monitor memory with:
+  ```bash
+  flutter run --release --profile
+  ```
+- **Compatibility:** Tested on Android 14 with Scoped Storage.
 
-🧪 Testing
+---
 
-UI: Verify animations, responsiveness, and font consistency (Roboto, 14sp/12sp).
-Functionality:
-Test cart operations and checkout with different payment methods.
-Validate search, filter, sort, and CSV export in transaction history.
+## 📈 Optimization
 
+- **Database:**
+  ```sql
+  CREATE INDEX idx_transactions_transaction_id ON transactions(transaction_id);
+  ```
+- **Pagination:** For transaction lists >1000 entries.
+- **Caching:** Cache products in memory.
 
-Performance:
-Test with 100+ transactions for smooth scrolling.
-Monitor memory: flutter run --release --profile.
+---
 
+## 🤝 Contributing
 
-Compatibility: Tested on Android 14 with Scoped Storage.
+1. Fork the repository.
+2. Create a feature branch:
+   ```bash
+   git checkout -b feature/<feature-name>
+   ```
+3. Commit your changes:
+   ```bash
+   git commit -m "Add <feature-name>"
+   ```
+4. Push to your branch:
+   ```bash
+   git push origin feature/<feature-name>
+   ```
+5. Open a pull request.
 
-📈 Optimization
+---
 
-Database: Add index for large datasets:CREATE INDEX idx_transactions_transaction_id ON transactions(transaction_id);
+## 📜 License
 
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
-Pagination: Implement for transaction lists >1000.
-Caching: Cache products in memory to reduce database queries.
+---
 
-🤝 Contributing
+## 🙌 Acknowledgments
 
-Fork the repository.
-Create a feature branch:git checkout -b feature/<feature-name>
+- Flutter for an awesome framework.
+- SQLite for reliable storage.
+- GitHub for hosting.
 
+---
 
-Commit changes:git commit -m "Add <feature-name>"
-
-
-Push to branch:git push origin feature/<feature-name>
-
-
-Open a pull request.
-
-📜 License
-This project is licensed under the MIT License. See LICENSE for details.
-🙌 Acknowledgments
-
-Flutter community for awesome packages.
-SQLite for reliable local storage.
-GitHub for hosting and collaboration.
-
-
-⭐ Star this repo if you find it useful! Feel free to open issues or submit PRs for improvements.
+⭐ **Star this repo if you find it useful!**  
+💬 **Open issues or submit PRs for improvements!**
