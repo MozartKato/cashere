@@ -6,8 +6,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:csv/csv.dart';
 import 'package:open_file/open_file.dart';
 import '../helper/database_helper.dart';
-import '../models/transaction.dart';
 import '../models/product.dart';
+import '../models/transaction.dart';
 import '../providers/locale_provider.dart';
 import '../providers/currency_provider.dart';
 
@@ -35,68 +35,61 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
 
   void _loadCachedProducts() async {
     _cachedProducts = await _databaseHelper.getAllProducts();
+    setState(() {});
   }
 
   Future<List<Map<String, dynamic>>> _getGroupedTransactions() async {
     final transactions = await _databaseHelper.getAllTransactions();
     final categories = await _databaseHelper.getAllCategories();
-    final Map<String, List<Transaction>> grouped = {};
 
-    // Filter transaksi
     final filteredTransactions = transactions.where((t) {
-      final matchesSearch = t.transactionId.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-          _cachedProducts
-              .firstWhere((p) => p.id == t.productId, orElse: () => Product(id: 0, name: '', price: 0, quantity: 0, category: ''))
-              .name
-              .toLowerCase()
-              .contains(_searchQuery.toLowerCase());
+      final matchesSearch = t.transactionId.toLowerCase().contains(_searchQuery.toLowerCase());
       final matchesDate = (_startDate == null && _endDate == null) ||
-          (DateTime.parse(t.transactionDate).isAfter(_startDate!) && DateTime.parse(t.transactionDate).isBefore(_endDate!));
+          (DateTime.parse(t.transactionDate).isAfter(_startDate!) &&
+              DateTime.parse(t.transactionDate).isBefore(_endDate!));
       final matchesPayment = _selectedPaymentMethod == null || t.paymentMethod == _selectedPaymentMethod;
-      final matchesCategory = _selectedCategory == null ||
-          _cachedProducts
-              .firstWhere((p) => p.id == t.productId, orElse: () => Product(id: 0, name: '', price: 0, quantity: 0, category: ''))
-              .category == _selectedCategory;
-      return matchesSearch && matchesDate && matchesPayment && matchesCategory;
+      return matchesSearch && matchesDate && matchesPayment;
     }).toList();
 
-    // Kelompokkan berdasarkan transactionId
-    for (var transaction in filteredTransactions) {
-      grouped.putIfAbsent(transaction.transactionId, () => []).add(transaction);
-    }
-
-    // Buat list untuk Card
     final List<Map<String, dynamic>> result = [];
-    for (var entry in grouped.entries) {
-      final transactionId = entry.key;
-      final transactionList = entry.value;
-      final total = transactionList.fold<double>(0, (sum, t) => sum + t.totalPrice);
-      final date = transactionList.first.transactionDate;
-      final paymentMethod = transactionList.first.paymentMethod;
-      final items = transactionList.map((t) {
+    for (var transaction in filteredTransactions) {
+      final items = await _databaseHelper.getTransactionItems(transaction.transactionId);
+      final filteredItems = items.where((item) {
+        if (_selectedCategory == null) return true;
         final product = _cachedProducts.firstWhere(
-              (p) => p.id == t.productId,
+              (p) => p.id == item.productId,
+          orElse: () => Product(id: 0, name: '', price: 0, quantity: 0, category: ''),
+        );
+        return product.category == _selectedCategory;
+      }).toList();
+
+      if (filteredItems.isEmpty && _selectedCategory != null) continue;
+
+      final itemDetails = filteredItems.map((item) {
+        final product = _cachedProducts.firstWhere(
+              (p) => p.id == item.productId,
           orElse: () => Product(id: 0, name: 'Unknown', price: 0, quantity: 0, category: 'Unknown'),
         );
         return {
           'productName': product.name,
-          'quantity': t.quantity,
-          'unitPrice': t.totalPrice / t.quantity,
-          'totalPrice': t.totalPrice,
+          'quantity': item.quantity,
+          'unitPrice': item.price,
           'category': product.category,
+          'totalPrice': item.price * item.quantity,
         };
       }).toList();
 
+      if (itemDetails.isEmpty) continue;
+
       result.add({
-        'transactionId': transactionId,
-        'total': total,
-        'date': date,
-        'paymentMethod': paymentMethod,
-        'items': items,
+        'transactionId': transaction.transactionId,
+        'total': transaction.totalPrice,
+        'date': transaction.transactionDate,
+        'paymentMethod': transaction.paymentMethod,
+        'items': itemDetails,
       });
     }
 
-    // Sort hasil
     result.sort((a, b) {
       int compare;
       switch (_sortBy) {
@@ -126,121 +119,129 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
 
     showDialog(
       context: context,
-      builder: (context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: Container(
-            padding: EdgeInsets.all(16),
-            constraints: BoxConstraints(maxWidth: 400),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    isId ? 'Detail Transaksi' : 'Transaction Details',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Theme.of(context).primaryColor),
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          padding: EdgeInsets.all(16),
+          constraints: BoxConstraints(maxWidth: 400),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isId ? 'Detail Transaksi' : 'Transaction Details',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).primaryColor,
                   ),
-                  SizedBox(height: 16),
-                  _buildDetailRow(
-                    isId ? 'ID Transaksi' : 'Transaction ID',
-                    transaction['transactionId'].substring(0, 8),
-                    context,
-                  ),
-                  _buildDetailRow(
-                    isId ? 'Tanggal' : 'Date',
-                    _formatDate(transaction['date'], isId ? 'id' : 'en'),
-                    context,
-                  ),
-                  _buildDetailRow(
-                    isId ? 'Metode Pembayaran' : 'Payment Method',
-                    transaction['paymentMethod'],
-                    context,
-                  ),
-                  SizedBox(height: 16),
-                  Text(
-                    isId ? 'Produk Dibeli' : 'Purchased Products',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                  SizedBox(height: 8),
-                  ...items.map((item) => AnimatedContainer(
-                    duration: Duration(milliseconds: 200),
-                    margin: EdgeInsets.symmetric(vertical: 4),
+                ),
+                SizedBox(height: 12),
+                _buildDetailRow(
+                  isId ? 'ID Transaksi' : 'Transaction ID',
+                  transaction['transactionId'].substring(0, 8),
+                  context,
+                ),
+                _buildDetailRow(
+                  isId ? 'Tanggal' : 'Date',
+                  _formatDate(transaction['date'], isId ? 'id' : 'en'),
+                  context,
+                ),
+                _buildDetailRow(
+                  isId ? 'Metode Pembayaran' : 'Payment Method',
+                  transaction['paymentMethod'],
+                  context,
+                ),
+                SizedBox(height: 16),
+                Text(
+                  isId ? 'Produk Dibeli' : 'Purchased Products',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                SizedBox(height: 8),
+                ...items.map((item) => Card(
+                  elevation: 2,
+                  margin: EdgeInsets.symmetric(vertical: 4),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  child: Padding(
                     padding: EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           item['productName'],
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                         ),
-                        SizedBox(height: 4),
+                        SizedBox(height: 6),
                         Text(
-                          isId
-                              ? 'Kategori: ${item['category']}'
-                              : 'Category: ${item['category']}',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          isId ? 'Kategori: ${item['category']}' : 'Category: ${item['category']}',
+                          style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                         ),
                         Text(
                           isId
                               ? 'Jumlah: ${item['quantity']} x ${currencyProvider.formatPrice(item['unitPrice'])}'
                               : 'Quantity: ${item['quantity']} x ${currencyProvider.formatPrice(item['unitPrice'])}',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                         ),
                         Text(
                           isId
                               ? 'Total: ${currencyProvider.formatPrice(item['totalPrice'])}'
                               : 'Total: ${currencyProvider.formatPrice(item['totalPrice'])}',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                         ),
                       ],
                     ),
-                  )),
-                  SizedBox(height: 16),
-                  _buildDetailRow(
-                    isId ? 'Total Transaksi' : 'Transaction Total',
-                    currencyProvider.formatPrice(transaction['total']),
-                    context,
-                    isBold: true,
                   ),
-                  SizedBox(height: 16),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: Text(isId ? 'Tutup' : 'Close', style: TextStyle(fontSize: 14)),
-                      style: ElevatedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
+                )),
+                SizedBox(height: 16),
+                _buildDetailRow(
+                  isId ? 'Total Transaksi' : 'Transaction Total',
+                  currencyProvider.formatPrice(transaction['total']),
+                  context,
+                  isBold: true,
+                ),
+                SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(isId ? 'Tutup' : 'Close', style: TextStyle(fontSize: 14)),
+                    style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      backgroundColor: Theme.of(context).primaryColor,
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
   Widget _buildDetailRow(String label, String value, BuildContext context, {bool isBold = false}) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
             label,
-            style: TextStyle(fontSize: 14, fontWeight: isBold ? FontWeight.w600 : FontWeight.normal),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: isBold ? FontWeight.w600 : FontWeight.normal,
+              color: Colors.grey[700],
+            ),
           ),
           Text(
             value,
-            style: TextStyle(fontSize: 14, fontWeight: isBold ? FontWeight.w600 : FontWeight.normal, color: Colors.grey[800]),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: isBold ? FontWeight.w600 : FontWeight.normal,
+              color: isBold ? Theme.of(context).primaryColor : Colors.grey[800],
+            ),
           ),
         ],
       ),
@@ -258,137 +259,148 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
 
     showDialog(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) => Dialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Container(
-              padding: EdgeInsets.all(16),
-              constraints: BoxConstraints(maxWidth: 400),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          padding: EdgeInsets.all(16),
+          constraints: BoxConstraints(maxWidth: 400),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isId ? 'Filter Transaksi' : 'Filter Transactions',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 16),
+                Text(isId ? 'Rentang Tanggal' : 'Date Range', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                Row(
                   children: [
-                    Text(
-                      isId ? 'Filter Transaksi' : 'Filter Transactions',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                    ),
-                    SizedBox(height: 16),
-                    Text(isId ? 'Rentang Tanggal' : 'Date Range', style: TextStyle(fontSize: 14)),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextButton(
-                            onPressed: () async {
-                              final picked = await showDatePicker(
-                                context: context,
-                                initialDate: tempStartDate ?? DateTime.now(),
-                                firstDate: DateTime(2000),
-                                lastDate: DateTime.now(),
-                              );
-                              if (picked != null) {
-                                setState(() => tempStartDate = picked);
-                              }
-                            },
-                            child: Text(
-                              tempStartDate == null
-                                  ? (isId ? 'Pilih Mulai' : 'Select Start')
-                                  : _formatDate(tempStartDate!.toIso8601String(), isId ? 'id' : 'en'),
-                              style: TextStyle(fontSize: 14),
-                            ),
-                          ),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: tempStartDate ?? DateTime.now(),
+                            firstDate: DateTime(2000),
+                            lastDate: DateTime.now(),
+                          );
+                          if (picked != null) {
+                            setState(() => tempStartDate = picked);
+                          }
+                        },
+                        child: Text(
+                          tempStartDate == null
+                              ? (isId ? 'Pilih Mulai' : 'Select Start')
+                              : _formatDate(tempStartDate!.toIso8601String(), isId ? 'id' : 'en'),
+                          style: TextStyle(fontSize: 14),
                         ),
-                        Expanded(
-                          child: TextButton(
-                            onPressed: () async {
-                              final picked = await showDatePicker(
-                                context: context,
-                                initialDate: tempEndDate ?? DateTime.now(),
-                                firstDate: tempStartDate ?? DateTime(2000),
-                                lastDate: DateTime.now(),
-                              );
-                              if (picked != null) {
-                                setState(() => tempEndDate = picked);
-                              }
-                            },
-                            child: Text(
-                              tempEndDate == null
-                                  ? (isId ? 'Pilih Akhir' : 'Select End')
-                                  : _formatDate(tempEndDate!.toIso8601String(), isId ? 'id' : 'en'),
-                              style: TextStyle(fontSize: 14),
-                            ),
-                          ),
+                        style: OutlinedButton.styleFrom(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
-                      ],
-                    ),
-                    SizedBox(height: 16),
-                    Text(isId ? 'Metode Pembayaran' : 'Payment Method', style: TextStyle(fontSize: 14)),
-                    DropdownButtonFormField<String?>(
-                      value: tempPaymentMethod,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       ),
-                      items: [
-                        DropdownMenuItem(value: null, child: Text(isId ? 'Semua' : 'All', style: TextStyle(fontSize: 14))),
-                        DropdownMenuItem(value: 'Cash', child: Text('Cash', style: TextStyle(fontSize: 14))),
-                        DropdownMenuItem(value: 'Card', child: Text('Card', style: TextStyle(fontSize: 14))),
-                        DropdownMenuItem(value: 'QRIS', child: Text('QRIS', style: TextStyle(fontSize: 14))),
-                      ],
-                      onChanged: (value) => setState(() => tempPaymentMethod = value),
                     ),
-                    SizedBox(height: 16),
-                    Text(isId ? 'Kategori Produk' : 'Product Category', style: TextStyle(fontSize: 14)),
-                    DropdownButtonFormField<String?>(
-                      value: tempCategory,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: tempEndDate ?? DateTime.now(),
+                            firstDate: tempStartDate ?? DateTime(2000),
+                            lastDate: DateTime.now(),
+                          );
+                          if (picked != null) {
+                            setState(() => tempEndDate = picked);
+                          }
+                        },
+                        child: Text(
+                          tempEndDate == null
+                              ? (isId ? 'Pilih Akhir' : 'Select End')
+                              : _formatDate(tempEndDate!.toIso8601String(), isId ? 'id' : 'en'),
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
                       ),
-                      items: [
-                        DropdownMenuItem(value: null, child: Text(isId ? 'Semua' : 'All', style: TextStyle(fontSize: 14))),
-                        ...categories.map((category) => DropdownMenuItem(
-                          value: category.name,
-                          child: Text(category.name, style: TextStyle(fontSize: 14)),
-                        )),
-                      ],
-                      onChanged: (value) => setState(() => tempCategory = value),
-                    ),
-                    SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: Text(isId ? 'Batal' : 'Cancel', style: TextStyle(fontSize: 14)),
-                        ),
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() {
-                              _startDate = tempStartDate;
-                              _endDate = tempEndDate;
-                              _selectedPaymentMethod = tempPaymentMethod;
-                              _selectedCategory = tempCategory;
-                            });
-                            Navigator.pop(context);
-                            setState(() {}); // Refresh UI
-                          },
-                          child: Text(isId ? 'Terapkan' : 'Apply', style: TextStyle(fontSize: 14)),
-                          style: ElevatedButton.styleFrom(
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          ),
-                        ),
-                      ],
                     ),
                   ],
                 ),
-              ),
+                SizedBox(height: 16),
+                Text(isId ? 'Metode Pembayaran' : 'Payment Method', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                DropdownButtonFormField<String?>(
+                  value: tempPaymentMethod,
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    filled: true,
+                    fillColor: Colors.grey[100],
+                  ),
+                  items: [
+                    DropdownMenuItem(value: null, child: Text(isId ? 'Semua' : 'All', style: TextStyle(fontSize: 14))),
+                    DropdownMenuItem(value: 'Cash', child: Text('Cash', style: TextStyle(fontSize: 14))),
+                    DropdownMenuItem(value: 'Card', child: Text('Card', style: TextStyle(fontSize: 14))),
+                    DropdownMenuItem(value: 'QRIS', child: Text('QRIS', style: TextStyle(fontSize: 14))),
+                  ],
+                  onChanged: (value) => setState(() => tempPaymentMethod = value),
+                ),
+                SizedBox(height: 16),
+                Text(isId ? 'Kategori Produk' : 'Product Category', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                DropdownButtonFormField<String?>(
+                  value: tempCategory,
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    filled: true,
+                    fillColor: Colors.grey[100],
+                  ),
+                  items: [
+                    DropdownMenuItem(value: null, child: Text(isId ? 'Semua' : 'All', style: TextStyle(fontSize: 14))),
+                    ...categories.map((category) => DropdownMenuItem(
+                      value: category.name,
+                      child: Text(category.name, style: TextStyle(fontSize: 14)),
+                    )),
+                  ],
+                  onChanged: (value) => setState(() => tempCategory = value),
+                ),
+                SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(isId ? 'Batal' : 'Cancel', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                    ),
+                    SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _startDate = tempStartDate;
+                          _endDate = tempEndDate;
+                          _selectedPaymentMethod = tempPaymentMethod;
+                          _selectedCategory = tempCategory;
+                        });
+                        Navigator.pop(context);
+                        setState(() {});
+                      },
+                      child: Text(isId ? 'Terapkan' : 'Apply', style: TextStyle(fontSize: 14)),
+                      style: ElevatedButton.styleFrom(
+                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        backgroundColor: Theme.of(context).primaryColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -408,7 +420,8 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
           isId ? 'Kategori' : 'Category',
           isId ? 'Jumlah' : 'Quantity',
           isId ? 'Harga Satuan' : 'Unit Price',
-          isId ? 'Total' : 'Total',
+          isId ? 'Total Item' : 'Item Total',
+          isId ? 'Total Transaksi' : 'Transaction Total',
         ],
         ...transactions.expand((t) => (t['items'] as List<Map<String, dynamic>>).map((item) => [
           t['transactionId'],
@@ -418,6 +431,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
           item['category'],
           item['quantity'].toString(),
           currencyProvider.formatPrice(item['unitPrice']),
+          currencyProvider.formatPrice(item['totalPrice']),
           currencyProvider.formatPrice(t['total']),
         ])),
       ];
@@ -478,13 +492,14 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       appBar: AppBar(
         title: Text(
           isId ? 'Riwayat Transaksi' : 'Transaction History',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
         ),
+        backgroundColor: theme.primaryColor,
         elevation: 0,
-        backgroundColor: theme.primaryColor.withOpacity(0.9),
+        centerTitle: true,
         actions: [
           IconButton(
-            icon: Icon(Icons.download, size: 20),
+            icon: Icon(Icons.download, size: 24),
             onPressed: _exportToCsv,
             tooltip: isId ? 'Ekspor ke CSV' : 'Export to CSV',
           ),
@@ -519,21 +534,19 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       body: Column(
         children: [
           Padding(
-            padding: EdgeInsets.all(isMobile ? 8.0 : 12.0),
+            padding: EdgeInsets.all(isMobile ? 12 : 16),
             child: TextField(
               decoration: InputDecoration(
                 hintText: isId ? 'Cari transaksi...' : 'Search transactions...',
-                prefixIcon: Icon(Icons.search, size: 20, color: Colors.grey[600]),
+                prefixIcon: Icon(Icons.search, size: 24, color: Colors.grey[600]),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
                 fillColor: Colors.grey[100],
-                contentPadding: EdgeInsets.symmetric(vertical: 10),
+                contentPadding: EdgeInsets.symmetric(vertical: 14),
               ),
               style: TextStyle(fontSize: 14),
               onChanged: (value) {
-                setState(() {
-                  _searchQuery = value;
-                });
+                setState(() => _searchQuery = value);
               },
             ),
           ),
@@ -546,35 +559,30 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                 }
                 if (!snapshot.hasData || snapshot.data!.isEmpty) {
                   return Center(
-                    child: Text(
-                      isId ? 'Belum ada transaksi.' : 'No transactions yet.',
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.history_toggle_off, size: 64, color: Colors.grey[400]),
+                        SizedBox(height: 16),
+                        Text(
+                          isId ? 'Belum ada transaksi' : 'No transactions yet',
+                          style: TextStyle(fontSize: 16, color: Colors.grey[600], fontWeight: FontWeight.w500),
+                        ),
+                      ],
                     ),
                   );
                 }
                 final transactions = snapshot.data!;
                 return ListView.builder(
-                  padding: EdgeInsets.all(isMobile ? 8.0 : 12.0),
+                  padding: EdgeInsets.all(isMobile ? 12 : 16),
                   physics: ClampingScrollPhysics(),
-                  clipBehavior: Clip.hardEdge,
                   itemCount: transactions.length,
                   itemBuilder: (context, index) {
                     final transaction = transactions[index];
-                    return AnimatedContainer(
-                      duration: Duration(milliseconds: 200),
-                      margin: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
-                            spreadRadius: 1,
-                            blurRadius: 4,
-                            offset: Offset(0, 2),
-                          ),
-                        ],
-                      ),
+                    return Card(
+                      elevation: 3,
+                      margin: EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       child: InkWell(
                         onTap: () => _showTransactionDetails(context, transaction),
                         borderRadius: BorderRadius.circular(12),
@@ -590,7 +598,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                                     isId
                                         ? 'Transaksi #${transaction['transactionId'].substring(0, 8)}'
                                         : 'Transaction #${transaction['transactionId'].substring(0, 8)}',
-                                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                                   ),
                                   Chip(
                                     label: Text(
@@ -598,7 +606,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                                       style: TextStyle(fontSize: 12, color: Colors.white),
                                     ),
                                     backgroundColor: theme.primaryColor,
-                                    padding: EdgeInsets.symmetric(horizontal: 4),
+                                    padding: EdgeInsets.symmetric(horizontal: 8),
                                   ),
                                 ],
                               ),
@@ -607,13 +615,13 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                                 isId
                                     ? 'Total: ${currencyProvider.formatPrice(transaction['total'])}'
                                     : 'Total: ${currencyProvider.formatPrice(transaction['total'])}',
-                                style: TextStyle(fontSize: 14, color: Colors.grey[800]),
+                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: theme.primaryColor),
                               ),
                               Text(
                                 isId
                                     ? 'Tanggal: ${_formatDate(transaction['date'], 'id')}'
                                     : 'Date: ${_formatDate(transaction['date'], 'en')}',
-                                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                               ),
                             ],
                           ),

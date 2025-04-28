@@ -24,7 +24,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
     _loadProducts();
   }
 
-  void _loadProducts() async {
+  Future<void> _loadProducts() async {
     List<Product> products = await _databaseHelper.getAllProducts();
     setState(() {
       _products = products;
@@ -32,6 +32,14 @@ class _TransactionScreenState extends State<TransactionScreen> {
   }
 
   void _addToCart(int productId) {
+    final product = _products.firstWhere((p) => p.id == productId);
+    final isId = Provider.of<LocaleProvider>(context, listen: false).locale.languageCode == 'id';
+    if (product.quantity <= (_cart[productId] ?? 0)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(isId ? 'Stok tidak cukup!' : 'Insufficient stock!')),
+      );
+      return;
+    }
     setState(() {
       _cart[productId] = (_cart[productId] ?? 0) + 1;
       _cartItemCount.value = _cart.values.fold(0, (sum, qty) => sum + qty);
@@ -65,8 +73,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: Text(isId ? 'Pilih Metode Pembayaran' : 'Select Payment Method'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          isId ? 'Pilih Metode Pembayaran' : 'Select Payment Method',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
         content: StatefulBuilder(
           builder: (context, setState) => Column(
             mainAxisSize: MainAxisSize.min,
@@ -76,18 +87,21 @@ class _TransactionScreenState extends State<TransactionScreen> {
                 value: 'Cash',
                 groupValue: selectedMethod,
                 onChanged: (value) => setState(() => selectedMethod = value),
+                activeColor: Theme.of(context).primaryColor,
               ),
               RadioListTile<String>(
                 title: Text('Card', style: TextStyle(fontSize: 14)),
                 value: 'Card',
                 groupValue: selectedMethod,
                 onChanged: (value) => setState(() => selectedMethod = value),
+                activeColor: Theme.of(context).primaryColor,
               ),
               RadioListTile<String>(
                 title: Text('QRIS', style: TextStyle(fontSize: 14)),
                 value: 'QRIS',
                 groupValue: selectedMethod,
                 onChanged: (value) => setState(() => selectedMethod = value),
+                activeColor: Theme.of(context).primaryColor,
               ),
             ],
           ),
@@ -95,11 +109,15 @@ class _TransactionScreenState extends State<TransactionScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(isId ? 'Batal' : 'Cancel'),
+            child: Text(isId ? 'Batal' : 'Cancel', style: TextStyle(color: Colors.grey[600])),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, selectedMethod),
             child: Text(isId ? 'Konfirmasi' : 'Confirm'),
+            style: ElevatedButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              backgroundColor: Theme.of(context).primaryColor,
+            ),
           ),
         ],
       ),
@@ -121,23 +139,42 @@ class _TransactionScreenState extends State<TransactionScreen> {
       return;
     }
 
-    for (var entry in _cart.entries) {
-      final product = _products.firstWhere((p) => p.id == entry.key);
+    try {
+      double totalPrice = _calculateTotalPrice();
       final transaction = Transaction(
         transactionId: Uuid().v4(),
-        productId: entry.key,
-        quantity: entry.value,
-        totalPrice: product.price * entry.value,
         transactionDate: DateTime.now().toIso8601String(),
+        totalPrice: totalPrice,
         paymentMethod: paymentMethod,
       );
-      await _databaseHelper.insertTransaction(transaction);
-    }
 
-    _clearCart();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(isId ? 'Transaksi berhasil!' : 'Transaction successful!')),
-    );
+      await _databaseHelper.insertTransaction(transaction);
+
+      for (var entry in _cart.entries) {
+        final product = _products.firstWhere((p) => p.id == entry.key);
+        final transactionItem = TransactionItem(
+          transactionId: transaction.transactionId,
+          productId: entry.key,
+          quantity: entry.value,
+          price: product.price,
+        );
+        await _databaseHelper.insertTransactionItem(transactionItem);
+        await _databaseHelper.updateProductQuantity(
+          product.id!,
+          product.quantity - entry.value,
+        );
+      }
+
+      _clearCart();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(isId ? 'Transaksi berhasil!' : 'Transaction successful!')),
+      );
+      await _loadProducts();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(isId ? 'Gagal menyimpan transaksi: $e' : 'Failed to save transaction: $e')),
+      );
+    }
   }
 
   double _calculateTotalPrice() {
@@ -160,57 +197,60 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(isId ? 'Transaksi' : 'Transaction', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+        title: Text(
+          isId ? 'Transaksi' : 'Transaction',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+        ),
+        backgroundColor: theme.primaryColor,
         elevation: 0,
-        backgroundColor: theme.primaryColor.withOpacity(0.9),
+        centerTitle: true,
       ),
       body: Column(
         children: [
           Expanded(
             child: _products.isEmpty
                 ? Center(
-              child: Text(
-                isId ? 'Tidak ada produk' : 'No products found',
-                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey[400]),
+                  SizedBox(height: 16),
+                  Text(
+                    isId ? 'Tidak ada produk' : 'No products found',
+                    style: TextStyle(fontSize: 16, color: Colors.grey[600], fontWeight: FontWeight.w500),
+                  ),
+                ],
               ),
             )
                 : ListView.builder(
-              padding: EdgeInsets.all(isMobile ? 8.0 : 12.0),
+              padding: EdgeInsets.all(isMobile ? 12 : 16),
               physics: ClampingScrollPhysics(),
-              clipBehavior: Clip.hardEdge,
               itemCount: _products.length,
               itemBuilder: (context, index) {
                 final product = _products[index];
-                return AnimatedContainer(
-                  duration: Duration(milliseconds: 200),
-                  margin: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
-                        spreadRadius: 1,
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
+                return Card(
+                  elevation: 3,
+                  margin: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   child: ListTile(
                     contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     title: Text(
                       product.name,
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                       overflow: TextOverflow.ellipsis,
                     ),
                     subtitle: Text(
                       isId
-                          ? 'Harga: ${currencyProvider.formatPrice(product.price)} | Stok: ${product.quantity}'
-                          : 'Price: ${currencyProvider.formatPrice(product.price)} | Stock: ${product.quantity}',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          ? 'Harga: ${currencyProvider.formatPrice(product.price)}\nStok: ${product.quantity}'
+                          : 'Price: ${currencyProvider.formatPrice(product.price)}\nStock: ${product.quantity}',
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600], height: 1.5),
                     ),
                     trailing: IconButton(
-                      icon: Icon(Icons.add_circle, color: theme.primaryColor, size: 24),
+                      icon: Icon(
+                        Icons.add_circle,
+                        color: product.quantity > 0 ? theme.primaryColor : Colors.grey[400],
+                        size: 28,
+                      ),
                       onPressed: product.quantity > 0 ? () => _addToCart(product.id!) : null,
                       tooltip: isId ? 'Tambah ke Keranjang' : 'Add to Cart',
                     ),
@@ -221,16 +261,16 @@ class _TransactionScreenState extends State<TransactionScreen> {
           ),
           AnimatedContainer(
             duration: Duration(milliseconds: 300),
-            height: _cart.isEmpty ? 60 : MediaQuery.of(context).size.height * 0.4,
+            height: _cart.isEmpty ? 80 : MediaQuery.of(context).size.height * 0.45,
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withOpacity(0.2),
-                  spreadRadius: 1,
+                  color: Colors.grey.withOpacity(0.3),
+                  spreadRadius: 2,
                   blurRadius: 8,
-                  offset: Offset(0, -2),
+                  offset: Offset(0, -3),
                 ),
               ],
             ),
@@ -238,19 +278,19 @@ class _TransactionScreenState extends State<TransactionScreen> {
                 ? Center(
               child: Text(
                 isId ? 'Keranjang kosong' : 'Cart is empty',
-                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 16, color: Colors.grey[600], fontWeight: FontWeight.w500),
               ),
             )
                 : Column(
               children: [
                 Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
                         isId ? 'Keranjang' : 'Cart',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                       ValueListenableBuilder<int>(
                         valueListenable: _cartItemCount,
@@ -258,7 +298,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
                             ? Chip(
                           label: Text('$count', style: TextStyle(fontSize: 12, color: Colors.white)),
                           backgroundColor: theme.primaryColor,
-                          padding: EdgeInsets.zero,
+                          padding: EdgeInsets.symmetric(horizontal: 8),
                         )
                             : SizedBox.shrink(),
                       ),
@@ -267,42 +307,54 @@ class _TransactionScreenState extends State<TransactionScreen> {
                 ),
                 Expanded(
                   child: ListView.builder(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 12),
                     itemCount: _cart.length,
                     itemBuilder: (context, index) {
                       final entry = _cart.entries.elementAt(index);
                       final product = _products.firstWhere((p) => p.id == entry.key);
-                      return AnimatedOpacity(
-                        duration: Duration(milliseconds: 200),
-                        opacity: 1.0,
-                        child: ListTile(
-                          dense: true,
-                          title: Text(
-                            product.name,
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            isId
-                                ? 'Harga: ${currencyProvider.formatPrice(product.price)} x ${entry.value}'
-                                : 'Price: ${currencyProvider.formatPrice(product.price)} x ${entry.value}',
-                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: Icon(Icons.remove_circle_outline, size: 20, color: Colors.grey[600]),
-                                onPressed: () => _removeFromCart(entry.key),
-                                tooltip: isId ? 'Kurangi' : 'Remove',
-                              ),
-                              Text('${entry.value}', style: TextStyle(fontSize: 14)),
-                              IconButton(
-                                icon: Icon(Icons.add_circle_outline, size: 20, color: theme.primaryColor),
-                                onPressed: product.quantity > entry.value ? () => _addToCart(entry.key) : null,
-                                tooltip: isId ? 'Tambah' : 'Add',
-                              ),
-                            ],
+                      return Dismissible(
+                        key: Key('${product.id}'),
+                        background: Container(
+                          color: Colors.red,
+                          alignment: Alignment.centerRight,
+                          padding: EdgeInsets.only(right: 16),
+                          child: Icon(Icons.delete, color: Colors.white),
+                        ),
+                        direction: DismissDirection.endToStart,
+                        onDismissed: (_) => _removeFromCart(entry.key),
+                        child: Card(
+                          elevation: 2,
+                          margin: EdgeInsets.symmetric(vertical: 4),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          child: ListTile(
+                            dense: true,
+                            title: Text(
+                              product.name,
+                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              isId
+                                  ? '${currencyProvider.formatPrice(product.price)} x ${entry.value}'
+                                  : '${currencyProvider.formatPrice(product.price)} x ${entry.value}',
+                              style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: Icon(Icons.remove_circle, size: 24, color: Colors.grey[600]),
+                                  onPressed: () => _removeFromCart(entry.key),
+                                  tooltip: isId ? 'Kurangi' : 'Remove',
+                                ),
+                                Text('${entry.value}', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                                IconButton(
+                                  icon: Icon(Icons.add_circle, size: 24, color: theme.primaryColor),
+                                  onPressed: product.quantity > entry.value ? () => _addToCart(entry.key) : null,
+                                  tooltip: isId ? 'Tambah' : 'Add',
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       );
@@ -310,49 +362,57 @@ class _TransactionScreenState extends State<TransactionScreen> {
                   ),
                 ),
                 Padding(
-                  padding: EdgeInsets.all(isMobile ? 8.0 : 12.0),
+                  padding: EdgeInsets.all(isMobile ? 12 : 16),
                   child: Column(
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            isId ? 'Total:' : 'Total:',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                            isId ? 'Total' : 'Total',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                           ),
                           Text(
                             currencyProvider.formatPrice(_calculateTotalPrice()),
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: theme.primaryColor),
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: theme.primaryColor,
+                            ),
                           ),
                         ],
                       ),
-                      SizedBox(height: 8),
+                      SizedBox(height: 12),
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          OutlinedButton(
-                            onPressed: _clearCart,
-                            child: Text(
-                              isId ? 'Kosongkan' : 'Clear Cart',
-                              style: TextStyle(fontSize: 14, color: theme.primaryColor),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              side: BorderSide(color: theme.primaryColor),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _clearCart,
+                              child: Text(
+                                isId ? 'Kosongkan' : 'Clear',
+                                style: TextStyle(fontSize: 14, color: theme.primaryColor),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                side: BorderSide(color: theme.primaryColor),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
                             ),
                           ),
-                          ElevatedButton(
-                            onPressed: _showPaymentMethodDialog,
-                            child: Text(
-                              isId ? 'Bayar' : 'Checkout',
-                              style: TextStyle(fontSize: 14, color: Colors.white),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              backgroundColor: theme.primaryColor,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              elevation: 3,
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: _showPaymentMethodDialog,
+                              child: Text(
+                                isId ? 'Bayar' : 'Checkout',
+                                style: TextStyle(fontSize: 14, color: Colors.white),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                backgroundColor: theme.primaryColor,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                elevation: 4,
+                              ),
                             ),
                           ),
                         ],

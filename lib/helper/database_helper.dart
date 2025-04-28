@@ -22,7 +22,7 @@ class DatabaseHelper {
     String dbPath = path.join(await sql.getDatabasesPath(), 'cashere.db');
     return await sql.openDatabase(
       dbPath,
-      version: 6,
+      version: 7,
       onCreate: (db, version) async {
         print('Creating database tables for version $version');
         await db.execute('''
@@ -42,16 +42,23 @@ class DatabaseHelper {
         ''');
         await db.execute('''
           CREATE TABLE transactions (
+            transaction_id TEXT PRIMARY KEY,
+            transaction_date TEXT,
+            total_price REAL,
+            payment_method TEXT
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE transaction_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             transaction_id TEXT,
             product_id INTEGER,
             quantity INTEGER,
-            total_price REAL,
-            transaction_date TEXT,
-            payment_method TEXT
+            price REAL,
+            FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id),
+            FOREIGN KEY (product_id) REFERENCES products(id)
           )
         ''');
-        // Seed data untuk kategori
         await db.insert('categories', {'name': 'Minuman'}, conflictAlgorithm: sql.ConflictAlgorithm.ignore);
         await db.insert('categories', {'name': 'Makanan'}, conflictAlgorithm: sql.ConflictAlgorithm.ignore);
         await db.insert('categories', {'name': 'Uncategorized'}, conflictAlgorithm: sql.ConflictAlgorithm.ignore);
@@ -112,6 +119,53 @@ class DatabaseHelper {
           }
           await db.insert('categories', {'name': 'Uncategorized'}, conflictAlgorithm: sql.ConflictAlgorithm.ignore);
         }
+        if (oldVersion < 7) {
+          print('Migrating to new transactions and transaction_items tables');
+          await db.execute('''
+            CREATE TABLE new_transactions (
+              transaction_id TEXT PRIMARY KEY,
+              transaction_date TEXT,
+              total_price REAL,
+              payment_method TEXT
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE transaction_items (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              transaction_id TEXT,
+              product_id INTEGER,
+              quantity INTEGER,
+              price REAL,
+              FOREIGN KEY (transaction_id) REFERENCES new_transactions(transaction_id),
+              FOREIGN KEY (product_id) REFERENCES products(id)
+            )
+          ''');
+          final oldTransactions = await db.query('transactions');
+          for (var old in oldTransactions) {
+            final transactionId = old['transaction_id'] as String;
+            final totalPrice = old['total_price'] as double;
+            final transactionDate = old['transaction_date'] as String;
+            final paymentMethod = old['payment_method'] as String? ?? 'Unknown';
+            final productId = old['product_id'] as int;
+            final quantity = old['quantity'] as int;
+            final price = totalPrice / quantity;
+
+            await db.insert('new_transactions', {
+              'transaction_id': transactionId,
+              'transaction_date': transactionDate,
+              'total_price': totalPrice,
+              'payment_method': paymentMethod,
+            });
+            await db.insert('transaction_items', {
+              'transaction_id': transactionId,
+              'product_id': productId,
+              'quantity': quantity,
+              'price': price,
+            });
+          }
+          await db.execute('DROP TABLE transactions');
+          await db.execute('ALTER TABLE new_transactions RENAME TO transactions');
+        }
       },
     );
   }
@@ -144,6 +198,16 @@ class DatabaseHelper {
       'products',
       where: 'id = ?',
       whereArgs: [id],
+    );
+  }
+
+  Future<void> updateProductQuantity(int productId, int newQuantity) async {
+    final db = await database;
+    await db.update(
+      'products',
+      {'quantity': newQuantity},
+      where: 'id = ?',
+      whereArgs: [productId],
     );
   }
 
@@ -195,6 +259,22 @@ class DatabaseHelper {
     return List.generate(maps.length, (i) => Transaction.fromMap(maps[i]));
   }
 
+  // Transaction Item methods
+  Future<void> insertTransactionItem(TransactionItem item) async {
+    final db = await database;
+    await db.insert('transaction_items', item.toMap(), conflictAlgorithm: sql.ConflictAlgorithm.replace);
+  }
+
+  Future<List<TransactionItem>> getTransactionItems(String transactionId) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'transaction_items',
+      where: 'transaction_id = ?',
+      whereArgs: [transactionId],
+    );
+    return List.generate(maps.length, (i) => TransactionItem.fromMap(maps[i]));
+  }
+
   // Query untuk analytics: Penjualan per periode
   Future<List<Map<String, dynamic>>> getSalesByPeriod(String period, {DateTime? startDate, DateTime? endDate}) async {
     final db = await database;
@@ -242,9 +322,10 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getTopProducts(int limit, {DateTime? startDate, DateTime? endDate}) async {
     final db = await database;
     String query = '''
-      SELECT p.name, SUM(t.quantity) as total_sold
-      FROM transactions t
-      JOIN products p ON t.product_id = p.id
+      SELECT p.name, SUM(ti.quantity) as total_sold
+      FROM transaction_items ti
+      JOIN products p ON ti.product_id = p.id
+      JOIN transactions t ON ti.transaction_id = t.transaction_id
     ''';
     List<dynamic> args = [];
 
@@ -254,7 +335,7 @@ class DatabaseHelper {
       args.add(endDate.toIso8601String());
     }
 
-    query += ' GROUP BY t.product_id ORDER BY total_sold DESC LIMIT ?';
+    query += ' GROUP BY ti.product_id ORDER BY total_sold DESC LIMIT ?';
     args.add(limit);
 
     final List<Map<String, dynamic>> maps = await db.rawQuery(query, args);
@@ -265,9 +346,10 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getTopCategories({DateTime? startDate, DateTime? endDate}) async {
     final db = await database;
     String query = '''
-      SELECT p.category, SUM(t.quantity) as total_sold
-      FROM transactions t
-      JOIN products p ON t.product_id = p.id
+      SELECT p.category, SUM(ti.quantity) as total_sold
+      FROM transaction_items ti
+      JOIN products p ON ti.product_id = p.id
+      JOIN transactions t ON ti.transaction_id = t.transaction_id
     ''';
     List<dynamic> args = [];
 
@@ -287,9 +369,10 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getTransactionsByProduct(String productName, {DateTime? startDate, DateTime? endDate}) async {
     final db = await database;
     String query = '''
-      SELECT t.transaction_id, t.quantity, t.total_price, t.transaction_date, t.payment_method
-      FROM transactions t
-      JOIN products p ON t.product_id = p.id
+      SELECT t.transaction_id, ti.quantity, ti.price, t.transaction_date, t.payment_method
+      FROM transaction_items ti
+      JOIN transactions t ON ti.transaction_id = t.transaction_id
+      JOIN products p ON ti.product_id = p.id
       WHERE p.name = ?
     ''';
     List<dynamic> args = [productName];
@@ -310,9 +393,10 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getTransactionsByCategory(String category, {DateTime? startDate, DateTime? endDate}) async {
     final db = await database;
     String query = '''
-      SELECT t.transaction_id, t.quantity, t.total_price, t.transaction_date, p.name, t.payment_method
-      FROM transactions t
-      JOIN products p ON t.product_id = p.id
+      SELECT t.transaction_id, ti.quantity, ti.price, t.transaction_date, p.name, t.payment_method
+      FROM transaction_items ti
+      JOIN transactions t ON ti.transaction_id = t.transaction_id
+      JOIN products p ON ti.product_id = p.id
       WHERE p.category = ?
     ''';
     List<dynamic> args = [category];
