@@ -516,6 +516,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(isId ? 'Daftar Produk' : 'Product List'),
+        elevation: 0,
+        centerTitle: true,
         actions: [
           if (_isSelectMode)
             IconButton(

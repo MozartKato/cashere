@@ -199,9 +199,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
       appBar: AppBar(
         title: Text(
           isId ? 'Transaksi' : 'Transaction',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+          // style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
         ),
-        backgroundColor: theme.primaryColor,
+        // backgroundColor: theme.primaryColor,
         elevation: 0,
         centerTitle: true,
       ),

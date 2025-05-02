@@ -109,6 +109,8 @@ class SettingsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(localeProvider.locale.languageCode == 'id' ? 'Pengaturan' : 'Settings'),
+        elevation: 0,
+        centerTitle: true,
       ),
       body: ListView(
         padding: const EdgeInsets.all(16.0),

@@ -492,9 +492,9 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       appBar: AppBar(
         title: Text(
           isId ? 'Riwayat Transaksi' : 'Transaction History',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+          // style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
         ),
-        backgroundColor: theme.primaryColor,
+        // backgroundColor: theme.primaryColor,
         elevation: 0,
         centerTitle: true,
         actions: [

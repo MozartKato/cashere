@@ -34,7 +34,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(isId ? 'Analitik Penjualan' : 'Sales Analytics'),
+        elevation: 0,
+        centerTitle: true,
         actions: [
+          IconButton(
+            icon: Icon(Icons.download),
+            onPressed: () => _exportToCsv(context),
+          ),
           IconButton(
             icon: Icon(Icons.date_range),
             onPressed: () async {
@@ -51,10 +57,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 });
               }
             },
-          ),
-          IconButton(
-            icon: Icon(Icons.download),
-            onPressed: () => _exportToCsv(context),
           ),
         ],
       ),
