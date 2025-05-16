@@ -23,6 +23,10 @@ dependencies:
   path_provider: ^2.1.5
   permission_handler: ^12.0.0+1
   open_file: ^3.5.10
+  flutter_thermal_printer: ^1.2.1+1
+  flutter_esc_pos_utils: ^1.0.1
+  image_picker: ^1.1.2
+  image: ^4.5.4
 
 dev_dependencies:
   flutter_test:

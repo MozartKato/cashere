@@ -1,3 +1,5 @@
+import 'package:Cashere/providers/printer_provider.dart';
+import 'package:Cashere/providers/receipt_builder_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
@@ -22,11 +24,13 @@ class CashierApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => LocaleProvider()),
         ChangeNotifierProvider(create: (_) => CurrencyProvider()),
+        ChangeNotifierProvider(create: (_) => PrinterProvider()),
+        ChangeNotifierProvider(create: (_) => ReceiptBuilderProvider()),
       ],
       child: Consumer2<ThemeProvider, LocaleProvider>(
         builder: (context, themeProvider, localeProvider, _) {
           return MaterialApp(
-            title: 'Cashier App',
+            title: 'Cashere App',
             theme: ThemeData.light().copyWith(
               primaryColor: Colors.blue,
               colorScheme: ColorScheme.light(

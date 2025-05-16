@@ -1,8 +1,11 @@
+import 'package:Cashere/screens/receipt_builder_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/locale_provider.dart';
 import '../providers/currency_provider.dart';
+import '../providers/printer_provider.dart';
+import 'printer_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   @override
@@ -10,6 +13,7 @@ class SettingsScreen extends StatelessWidget {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final localeProvider = Provider.of<LocaleProvider>(context);
     final currencyProvider = Provider.of<CurrencyProvider>(context);
+    final printerProvider = Provider.of<PrinterProvider>(context);
 
     void _showLanguageDialog() {
       showDialog(
@@ -146,6 +150,36 @@ class SettingsScreen extends StatelessWidget {
             subtitle: Text(currencyProvider.thousandsSeparator == '.' ? '.' : ','),
             onTap: _showSeparatorDialog,
           ),
+          // Pengaturan Printer
+          ListTile(
+            title: Text(localeProvider.locale.languageCode == 'id' ? 'Printer' : 'Printer'),
+            subtitle: Text(printerProvider.selectedPrinter?.name ??
+                (localeProvider.locale.languageCode == 'id' ? 'Belum dipilih' : 'Not selected')),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => PrinterScreen()),
+              );
+            },
+          ),
+          // Builder Struk
+          ListTile(
+            title: Text(localeProvider.locale.languageCode == 'id'
+                ? 'Struktur Struk'
+                : 'Receipt Structure'),
+            subtitle: Text(localeProvider.locale.languageCode == 'id'
+                ? 'Edit tampilan struk'
+                : 'Customize receipt layout'),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ReceiptBuilderScreen(),
+                ),
+              );
+            },
+          ),
+
         ],
       ),
     );

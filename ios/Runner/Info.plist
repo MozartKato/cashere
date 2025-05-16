@@ -29,6 +29,10 @@
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
 	<key>UISupportedInterfaceOrientations</key>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Need Bluetooth to connect to printer</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Need location for Bluetooth scanning</string>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
