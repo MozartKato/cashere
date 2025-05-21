@@ -1,23 +1,24 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 
 enum ReceiptElementType { text, image, qr, barcode, line, transaction }
 
 enum TextSize { small, medium, large }
-enum TextAlign { left, center, right }
+enum ReceiptTextAlign { left, center, right }
 enum TextFont { normal, bold, monospace }
 
 class ReceiptElement {
   ReceiptElementType type;
   dynamic value; // String buat text/qr/barcode/line, File buat image, Map buat transaction
-  TextSize? textSize; // Ukuran teks
-  TextAlign? textAlign; // Alignment
-  TextFont? textFont; // Font style
+  TextSize? textSize;
+  ReceiptTextAlign? textAlign;
+  TextFont? textFont;
 
   ReceiptElement({
     required this.type,
     required this.value,
     this.textSize = TextSize.medium,
-    this.textAlign = TextAlign.center,
+    this.textAlign = ReceiptTextAlign.center,
     this.textFont = TextFont.normal,
   });
 }
@@ -31,11 +32,23 @@ class ReceiptBuilderProvider with ChangeNotifier {
     if (element.type == ReceiptElementType.line && element.value.isNotEmpty) {
       element.value = '';
     }
+    if (element.type == ReceiptElementType.text && element.value.isEmpty) {
+      throw 'Text gak boleh kosong, bro!';
+    }
+    if (element.type == ReceiptElementType.qr && element.value.isEmpty) {
+      throw 'QR code gak boleh kosong, bro!';
+    }
+    if (element.type == ReceiptElementType.barcode && (element.value.length != 12 || int.tryParse(element.value) == null)) {
+      throw 'Barcode UPC-A harus 12 digit angka, anjir!';
+    }
+    if (element.type == ReceiptElementType.image && (element.value is! File || !element.value.existsSync())) {
+      throw 'Gambar gak valid, bro!';
+    }
     _elements.add(element);
     notifyListeners();
   }
 
-  void updateElementStyle(int index, {TextSize? size, TextAlign? align, TextFont? font}) {
+  void updateElementStyle(int index, {TextSize? size, ReceiptTextAlign? align, TextFont? font}) {
     if (index < 0 || index >= _elements.length) return;
     final element = _elements[index];
     if (element.type == ReceiptElementType.text || element.type == ReceiptElementType.transaction) {

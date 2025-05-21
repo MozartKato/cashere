@@ -4,10 +4,12 @@ import 'package:flutter_thermal_printer/flutter_thermal_printer.dart';
 import 'package:flutter_thermal_printer/utils/printer.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-
 import '../providers/printer_provider.dart';
+import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 
 class PrinterScreen extends StatefulWidget {
+  const PrinterScreen({super.key});
+
   @override
   _PrinterScreenState createState() => _PrinterScreenState();
 }
@@ -37,7 +39,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
         statuses[Permission.locationWhenInUse]!.isGranted;
 
     if (allGranted) {
-      _scanPrinters();
+      await _scanPrinters(); // Panggil tanpa expect return
     } else {
       _showSnackBar('Izin Bluetooth atau lokasi ditolak, goblok!');
     }
@@ -105,14 +107,9 @@ class _PrinterScreenState extends State<PrinterScreen> {
   }
 
   Future<void> _printTest(Printer printer) async {
+    final provider = Provider.of<PrinterProvider>(context, listen: false);
     try {
-      if (!(printer.isConnected ?? false)) {
-        await _thermalPrinter.connect(printer).timeout(
-          const Duration(seconds: 5),
-          onTimeout: () => throw 'Koneksi timeout, anjir!',
-        );
-      }
-
+      provider.setPrinter(printer); // Panggil tanpa await, karena void
       final profile = await CapabilityProfile.load();
       final generator = Generator(PaperSize.mm58, profile);
       List<int> bytes = [];
@@ -120,9 +117,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
       bytes += generator.text('Tes Print', styles: const PosStyles(align: PosAlign.center));
       bytes += generator.cut();
 
-      await _thermalPrinter.printData(printer, bytes);
-      await _thermalPrinter.disconnect(printer);
-
+      await provider.printData(bytes);
       _showSnackBar('Print berhasil, bro!');
     } catch (e) {
       _showSnackBar('Gagal print: $e');
@@ -139,7 +134,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
 
     return ListTile(
       title: Text(printer.name ?? 'Unknown'),
-      subtitle: Text(printer.address ?? 'No address'),
+      subtitle: Text('${printer.address ?? 'No address'} • ${printerProvider.isConnected && isSelected ? 'Connected' : 'Disconnected'}'),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -149,15 +144,16 @@ class _PrinterScreenState extends State<PrinterScreen> {
           ),
           IconButton(
             icon: Icon(
-              (printer.isConnected ?? false) ? Icons.link_off : Icons.link,
-              color: (printer.isConnected ?? false) ? Colors.red : Colors.blue,
+              printerProvider.isConnected && isSelected ? Icons.link_off : Icons.link,
+              color: printerProvider.isConnected && isSelected ? Colors.red : Colors.blue,
             ),
             onPressed: () async {
               try {
-                if (printer.isConnected ?? false) {
-                  await _thermalPrinter.disconnect(printer);
+                if (printerProvider.isConnected && isSelected) {
+                  await printerProvider.disconnect();
                 } else {
-                  await _thermalPrinter.connect(printer);
+                   printerProvider.setPrinter(printer);
+                  await printerProvider.connect();
                 }
                 if (mounted) setState(() {});
               } catch (e) {

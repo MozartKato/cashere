@@ -7,7 +7,6 @@ import 'package:csv/csv.dart';
 import 'package:open_file/open_file.dart';
 import '../helper/database_helper.dart';
 import '../models/product.dart';
-import '../models/transaction.dart';
 import '../providers/locale_provider.dart';
 import '../providers/currency_provider.dart';
 
@@ -40,7 +39,6 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
 
   Future<List<Map<String, dynamic>>> _getGroupedTransactions() async {
     final transactions = await _databaseHelper.getAllTransactions();
-    final categories = await _databaseHelper.getAllCategories();
 
     final filteredTransactions = transactions.where((t) {
       final matchesSearch = t.transactionId.toLowerCase().contains(_searchQuery.toLowerCase());
