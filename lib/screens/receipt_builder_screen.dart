@@ -15,12 +15,38 @@ class ReceiptBuilderScreen extends StatelessWidget {
     final builderProvider = Provider.of<ReceiptBuilderProvider>(context);
     final printerProvider = Provider.of<PrinterProvider>(context);
 
+    // Dummy data buat contoh transaksi
+    final dummyTransaction = {
+      'transactionId': 'TRX12345',
+      'transactionDate': '2025-05-21 14:00:00',
+      'totalPrice': 26000.0,
+      'paymentMethod': 'Cash',
+      'items': [
+        {'productName': 'Ayam Goreng', 'quantity': 1, 'unitPrice': 12000.0, 'totalPrice': 12000.0},
+        {'productName': 'Ayam Bakar', 'quantity': 1, 'unitPrice': 14000.0, 'totalPrice': 14000.0},
+      ],
+    };
+
     Future<void> _testPrint() async {
       if (printerProvider.selectedPrinter == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Pilih printer dulu, goblok!')),
         );
         return;
+      }
+
+      // Cek koneksi biar gak reconnect berulang
+      if (printerProvider.isConnected) {
+        print('Already connected, skipping reconnect');
+      } else {
+        try {
+          await printerProvider.connect().timeout(const Duration(seconds: 5));
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Gagal connect printer: $e')),
+          );
+          return;
+        }
       }
 
       final profile = await CapabilityProfile.load();
@@ -34,10 +60,11 @@ class ReceiptBuilderScreen extends StatelessWidget {
               bytes += generator.text(
                 el.value,
                 styles: PosStyles(
-                  bold: el.textFont == TextFont.bold || el.textSize == TextSize.large, // Bold otomatis buat large
+                  bold: el.textFont == TextFont.bold,
                   height: _mapTextSize(el.textSize),
                   width: _mapTextSize(el.textSize),
                   align: _mapTextAlign(el.textAlign),
+                  codeTable: 'CP437', // Font kecil
                 ),
               );
               break;
@@ -45,28 +72,73 @@ class ReceiptBuilderScreen extends StatelessWidget {
               bytes += generator.qrcode(el.value);
               break;
             case ReceiptElementType.barcode:
-              if (el.value.length == 12 && int.tryParse(el.value) == null) {
+              if (el.value.length != 12 || int.tryParse(el.value) == null) {
                 throw 'Barcode UPC-A harus 12 digit angka, anjir!';
               }
               bytes += generator.barcode(Barcode.upcA(el.value.split('').map(int.parse).toList()));
               break;
             case ReceiptElementType.line:
-              bytes += generator.hr();
+              final style = el.lineStyle ?? LineStyle.solid;
+              switch (style) {
+                case LineStyle.solid:
+                  bytes += generator.hr();
+                  break;
+                case LineStyle.dashed:
+                  bytes += generator.text('- ' * 16, styles: const PosStyles(align: PosAlign.center));
+                  break;
+                case LineStyle.double:
+                  bytes += generator.text('=' * 32, styles: const PosStyles(align: PosAlign.center, bold: true));
+                  break;
+                case LineStyle.patterned:
+                  bytes += generator.text('-*-' * 8, styles: const PosStyles(align: PosAlign.center));
+                  break;
+                case LineStyle.short:
+                  bytes += generator.text('-' * 20, styles: const PosStyles(align: PosAlign.center));
+                  break;
+                case LineStyle.decorative:
+                  bytes += generator.text('~' * 32, styles: const PosStyles(align: PosAlign.center));
+                  break;
+              }
               break;
             case ReceiptElementType.image:
               final file = el.value as File;
               if (!file.existsSync()) throw 'Gambar gak ada, bro!';
               final image = img.decodeImage(await file.readAsBytes());
               if (image == null) throw 'Gagal decode gambar, anjir!';
-              // Resize ke lebar 384px (kertas 58mm, 8px/mm)
               final resized = img.copyResize(image, width: 384);
-              // Convert ke monochrome
               final mono = img.grayscale(resized);
               final pixels = mono.getBytes();
               final bitmap = img.Image.fromBytes(width: mono.width, height: mono.height, bytes: pixels.buffer);
               bytes += generator.image(bitmap);
               break;
-            default:
+            case ReceiptElementType.transaction:
+              final trans = el.value as Map<String, dynamic>;
+              for (var item in trans['items']) {
+                // Format tabel: nama (18 char), qty (4 char), harga (10 char)
+                final name = item['productName'].toString().padRight(18).substring(0, 18);
+                final qty = item['quantity'].toString().padLeft(4);
+                final price = item['unitPrice'].toStringAsFixed(0).padLeft(10);
+                bytes += generator.text(
+                  '$name$qty$price',
+                  styles: PosStyles(
+                    bold: false, // Non-bold biar kecil
+                    height: _mapTextSize(TextSize.small),
+                    width: _mapTextSize(TextSize.small),
+                    align: _mapTextAlign(el.textAlign),
+                    codeTable: 'CP437', // Font kecil
+                  ),
+                );
+              }
+              bytes += generator.text(
+                'Total: ${trans['totalPrice'].toStringAsFixed(0)}'.padLeft(32),
+                styles: PosStyles(
+                  bold: true,
+                  height: _mapTextSize(TextSize.small),
+                  width: _mapTextSize(TextSize.small),
+                  align: PosAlign.right,
+                  codeTable: 'CP437',
+                ),
+              );
               break;
           }
         } catch (e) {
@@ -80,7 +152,7 @@ class ReceiptBuilderScreen extends StatelessWidget {
       bytes += generator.cut();
 
       try {
-        await printerProvider.printData(bytes);
+        await printerProvider.printData(bytes).timeout(const Duration(seconds: 10));
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Print sukses, bro! 🎉')),
         );
@@ -114,10 +186,31 @@ class ReceiptBuilderScreen extends StatelessWidget {
         return;
       }
 
+      if (type == ReceiptElementType.transaction) {
+        try {
+          builderProvider.addElement(
+            ReceiptElement(
+              type: ReceiptElementType.transaction,
+              value: dummyTransaction,
+              textAlign: ReceiptTextAlign.left,
+              textFont: TextFont.normal,
+              textSize: TextSize.small, // Default kecil
+            ),
+          );
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Gagal tambah transaksi: $e')),
+          );
+        }
+        return;
+      }
+
       final controller = TextEditingController();
       ReceiptTextAlign align = ReceiptTextAlign.center;
       TextFont font = TextFont.normal;
-      TextSize size = TextSize.medium;
+      TextSize size = TextSize.small; // Default kecil
+      LineStyle lineStyle = LineStyle.solid;
+
       showDialog(
         context: ctx,
         builder: (_) => StatefulBuilder(
@@ -126,11 +219,20 @@ class ReceiptBuilderScreen extends StatelessWidget {
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(
-                  controller: controller,
-                  keyboardType: type == ReceiptElementType.barcode ? TextInputType.number : TextInputType.text,
-                  decoration: InputDecoration(labelText: 'Isi ${type.name}'),
-                ),
+                if (type == ReceiptElementType.line)
+                  DropdownButton<LineStyle>(
+                    value: lineStyle,
+                    items: LineStyle.values
+                        .map((e) => DropdownMenuItem(value: e, child: Text(e.name.capitalize())))
+                        .toList(),
+                    onChanged: (value) => setState(() => lineStyle = value!),
+                  ),
+                if (type != ReceiptElementType.line)
+                  TextField(
+                    controller: controller,
+                    keyboardType: type == ReceiptElementType.barcode ? TextInputType.number : TextInputType.text,
+                    decoration: InputDecoration(labelText: 'Isi ${type.name}'),
+                  ),
                 if (type == ReceiptElementType.text) ...[
                   DropdownButton<ReceiptTextAlign>(
                     value: align,
@@ -146,10 +248,12 @@ class ReceiptBuilderScreen extends StatelessWidget {
                         .toList(),
                     onChanged: (value) => setState(() => size = value!),
                   ),
-                  CheckboxListTile(
-                    title: const Text('Bold'),
-                    value: font == TextFont.bold,
-                    onChanged: (value) => setState(() => font = value! ? TextFont.bold : TextFont.normal),
+                  DropdownButton<TextFont>(
+                    value: font,
+                    items: TextFont.values
+                        .map((e) => DropdownMenuItem(value: e, child: Text(e.name.capitalize())))
+                        .toList(),
+                    onChanged: (value) => setState(() => font = value!),
                   ),
                 ],
               ],
@@ -171,10 +275,11 @@ class ReceiptBuilderScreen extends StatelessWidget {
                     builderProvider.addElement(
                       ReceiptElement(
                         type: type,
-                        value: controller.text,
-                        textAlign: type == ReceiptElementType.text ? align : ReceiptTextAlign.center,
-                        textFont: type == ReceiptElementType.text ? font : TextFont.normal,
-                        textSize: type == ReceiptElementType.text ? size : TextSize.medium,
+                        value: type == ReceiptElementType.line ? '' : controller.text,
+                        textAlign: type == ReceiptElementType.text ? align : null,
+                        textFont: type == ReceiptElementType.text ? font : null,
+                        textSize: type == ReceiptElementType.text ? size : null,
+                        lineStyle: type == ReceiptElementType.line ? lineStyle : null,
                       ),
                     );
                     Navigator.pop(ctx);
@@ -194,37 +299,51 @@ class ReceiptBuilderScreen extends StatelessWidget {
 
     void _showEditStyleDialog(BuildContext ctx, int index) {
       final element = builderProvider.elements[index];
-      if (element.type != ReceiptElementType.text) return;
+      if (element.type != ReceiptElementType.text && element.type != ReceiptElementType.transaction && element.type != ReceiptElementType.line) return;
       ReceiptTextAlign align = element.textAlign ?? ReceiptTextAlign.center;
       TextFont font = element.textFont ?? TextFont.normal;
-      TextSize size = element.textSize ?? TextSize.medium;
+      TextSize size = element.textSize ?? TextSize.small;
+      LineStyle lineStyle = element.lineStyle ?? LineStyle.solid;
+
       showDialog(
         context: ctx,
         builder: (_) => StatefulBuilder(
           builder: (context, setState) => AlertDialog(
-            title: const Text('Edit Style Teks'),
+            title: Text('Edit Style ${element.type.name.capitalize()}'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                DropdownButton<ReceiptTextAlign>(
-                  value: align,
-                  items: ReceiptTextAlign.values
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e.name.capitalize())))
-                      .toList(),
-                  onChanged: (value) => setState(() => align = value!),
-                ),
-                DropdownButton<TextSize>(
-                  value: size,
-                  items: TextSize.values
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e.name.capitalize())))
-                      .toList(),
-                  onChanged: (value) => setState(() => size = value!),
-                ),
-                CheckboxListTile(
-                  title: const Text('Bold'),
-                  value: font == TextFont.bold,
-                  onChanged: (value) => setState(() => font = value! ? TextFont.bold : TextFont.normal),
-                ),
+                if (element.type == ReceiptElementType.line)
+                  DropdownButton<LineStyle>(
+                    value: lineStyle,
+                    items: LineStyle.values
+                        .map((e) => DropdownMenuItem(value: e, child: Text(e.name.capitalize())))
+                        .toList(),
+                    onChanged: (value) => setState(() => lineStyle = value!),
+                  ),
+                if (element.type == ReceiptElementType.text || element.type != ReceiptElementType.transaction) ...[
+                  DropdownButton<ReceiptTextAlign>(
+                    value: align,
+                    items: ReceiptTextAlign.values
+                        .map((e) => DropdownMenuItem(value: e, child: Text(e.name.capitalize())))
+                        .toList(),
+                    onChanged: (value) => setState(() => align = value!),
+                  ),
+                  DropdownButton<TextSize>(
+                    value: size,
+                    items: TextSize.values
+                        .map((e) => DropdownMenuItem(value: e, child: Text(e.name.capitalize())))
+                        .toList(),
+                    onChanged: (value) => setState(() => size = value!),
+                  ),
+                  DropdownButton<TextFont>(
+                    value: font,
+                    items: TextFont.values
+                        .map((e) => DropdownMenuItem(value: e, child: Text(e.name.capitalize())))
+                        .toList(),
+                    onChanged: (value) => setState(() => font = value!),
+                  ),
+                ],
               ],
             ),
             actions: [
@@ -236,9 +355,10 @@ class ReceiptBuilderScreen extends StatelessWidget {
                 onPressed: () {
                   builderProvider.updateElementStyle(
                     index,
-                    align: align,
-                    font: font,
-                    size: size,
+                    align: element.type != ReceiptElementType.line ? align : null,
+                    font: element.type != ReceiptElementType.line ? font : null,
+                    size: element.type != ReceiptElementType.line ? size : null,
+                    lineStyle: element.type == ReceiptElementType.line ? lineStyle : null,
                   );
                   Navigator.pop(ctx);
                 },
@@ -287,10 +407,15 @@ class ReceiptBuilderScreen extends StatelessWidget {
             ListTile(
               title: const Text('Garis Pemisah'),
               onTap: () {
-                builderProvider.addElement(
-                  ReceiptElement(type: ReceiptElementType.line, value: ''),
-                );
                 Navigator.pop(context);
+                _showInputDialog(context, ReceiptElementType.line);
+              },
+            ),
+            ListTile(
+              title: const Text('Transaksi'),
+              onTap: () {
+                Navigator.pop(context);
+                _showInputDialog(context, ReceiptElementType.transaction);
               },
             ),
           ],
@@ -325,8 +450,77 @@ class ReceiptBuilderScreen extends StatelessWidget {
               fit: BoxFit.contain,
               errorBuilder: (context, error, stackTrace) => const Text('Gagal load gambar'),
             )
+                : el.type == ReceiptElementType.transaction
+                ? Container(
+              padding: const EdgeInsets.symmetric(vertical: 4.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var item in (el.value as Map<String, dynamic>)['items'])
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 2.0),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 140,
+                            child: Text(
+                              item['productName'],
+                              style: TextStyle(
+                                fontWeight: el.textFont == TextFont.bold ? FontWeight.bold : FontWeight.normal,
+                                fontSize: _mapTextSizeToFontSize(el.textSize),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          SizedBox(
+                            width: 40,
+                            child: Text(
+                              '${item['quantity']}x',
+                              style: TextStyle(
+                                fontWeight: el.textFont == TextFont.bold ? FontWeight.bold : FontWeight.normal,
+                                fontSize: _mapTextSizeToFontSize(el.textSize),
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              item['unitPrice'].toStringAsFixed(0),
+                              style: TextStyle(
+                                fontWeight: el.textFont == TextFont.bold ? FontWeight.bold : FontWeight.normal,
+                                fontSize: _mapTextSizeToFontSize(el.textSize),
+                              ),
+                              textAlign: TextAlign.right,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4.0),
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 140),
+                        const SizedBox(width: 40),
+                        Expanded(
+                          child: Text(
+                            'Total: ${(el.value as Map<String, dynamic>)['totalPrice'].toStringAsFixed(0)}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: _mapTextSizeToFontSize(el.textSize),
+                              color: Theme.of(context).primaryColor,
+                            ),
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            )
                 : Text(
-              '${el.type.name.toUpperCase()}: ${el.value.isEmpty ? '---' : el.value}',
+              '${el.type.name.toUpperCase()}: ${el.value.isEmpty ? (el.lineStyle?.name.toUpperCase() ?? '---') : el.value}',
               style: TextStyle(
                 fontWeight: el.textFont == TextFont.bold || el.textSize == TextSize.large
                     ? FontWeight.bold
@@ -338,7 +532,7 @@ class ReceiptBuilderScreen extends StatelessWidget {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (el.type == ReceiptElementType.text)
+                if (el.type == ReceiptElementType.text || el.type == ReceiptElementType.transaction || el.type == ReceiptElementType.line)
                   IconButton(
                     icon: const Icon(Icons.edit),
                     onPressed: () => _showEditStyleDialog(context, index),
@@ -362,13 +556,13 @@ class ReceiptBuilderScreen extends StatelessWidget {
   PosTextSize _mapTextSize(TextSize? size) {
     switch (size) {
       case TextSize.small:
-        return PosTextSize.size1; // 1x width, 1x height
+        return PosTextSize.size1; // Kecil beneran
       case TextSize.medium:
-        return PosTextSize.size2; // 2x width, 2x height
+        return PosTextSize.size1; // Medium juga kecil biar konsisten
       case TextSize.large:
-        return PosTextSize.size2; // 2x width, 2x height (pake bold buat bedain)
+        return PosTextSize.size2; // Hanya large yang gede
       default:
-        return PosTextSize.size2;
+        return PosTextSize.size1;
     }
   }
 
@@ -399,12 +593,13 @@ class ReceiptBuilderScreen extends StatelessWidget {
   double _mapTextSizeToFontSize(TextSize? size) {
     switch (size) {
       case TextSize.small:
+        return 10.0; // Kecil di UI
+      case TextSize.medium:
         return 12.0;
       case TextSize.large:
-        return 18.0;
-      case TextSize.medium:
-      default:
         return 14.0;
+      default:
+        return 10.0;
     }
   }
 }

@@ -9,6 +9,11 @@ import '../helper/database_helper.dart';
 import '../models/product.dart';
 import '../providers/locale_provider.dart';
 import '../providers/currency_provider.dart';
+import '../providers/printer_provider.dart';
+import '../providers/receipt_builder_provider.dart';
+import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:image/image.dart' as img;
 
 class TransactionHistoryScreen extends StatefulWidget {
   @override
@@ -109,6 +114,157 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     return formatter.format(date);
   }
 
+  Future<void> _printTransaction(BuildContext context, Map<String, dynamic> transaction) async {
+    final printerProvider = Provider.of<PrinterProvider>(context, listen: false);
+    final builderProvider = Provider.of<ReceiptBuilderProvider>(context, listen: false);
+    final localeProvider = Provider.of<LocaleProvider>(context, listen: false);
+    final isId = localeProvider.locale.languageCode == 'id';
+
+    // Cek template
+    if (builderProvider.elements.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(isId ? 'Template kosong, goblok!' : 'Template is empty!')),
+      );
+      return;
+    }
+    if (!builderProvider.elements.any((el) => el.type == ReceiptElementType.transaction)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(isId ? 'Gak ada elemen transaksi di template!' : 'No transaction element in template!')),
+      );
+      return;
+    }
+
+    // Cek printer
+    if (printerProvider.selectedPrinter == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(isId ? 'Pilih printer dulu, goblok!' : 'Select printer first!')),
+      );
+      return;
+    }
+
+    // Cek koneksi BLE
+    if (printerProvider.isConnected) {
+      print('Already connected, skipping reconnect');
+    } else {
+      try {
+        await printerProvider.connect().timeout(const Duration(seconds: 5));
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(isId ? 'Gagal connect printer: $e' : 'Failed to connect printer: $e')),
+        );
+        return;
+      }
+    }
+
+    final profile = await CapabilityProfile.load();
+    final generator = Generator(PaperSize.mm58, profile);
+    List<int> bytes = [];
+
+    try {
+      for (var el in builderProvider.elements) {
+        switch (el.type) {
+          case ReceiptElementType.text:
+            bytes += generator.text(
+              el.value,
+              styles: PosStyles(
+                bold: el.textFont == TextFont.bold,
+                height: _mapTextSize(el.textSize),
+                width: _mapTextSize(el.textSize),
+                align: _mapTextAlign(el.textAlign),
+                codeTable: 'CP437',
+              ),
+            );
+            break;
+          case ReceiptElementType.qr:
+            bytes += generator.qrcode(el.value);
+            break;
+          case ReceiptElementType.barcode:
+            if (el.value.length != 12 || int.tryParse(el.value) == null) {
+              throw 'Barcode UPC-A harus 12 digit angka, anjir!';
+            }
+            bytes += generator.barcode(Barcode.upcA(el.value.split('').map(int.parse).toList()));
+            break;
+          case ReceiptElementType.line:
+            final style = el.lineStyle ?? LineStyle.solid;
+            switch (style) {
+              case LineStyle.solid:
+                bytes += generator.hr();
+                break;
+              case LineStyle.dashed:
+                bytes += generator.text('- ' * 16, styles: const PosStyles(align: PosAlign.center));
+                break;
+              case LineStyle.double:
+                bytes += generator.text('=' * 32, styles: const PosStyles(align: PosAlign.center, bold: true));
+                break;
+              case LineStyle.patterned:
+                bytes += generator.text('-*-' * 8, styles: const PosStyles(align: PosAlign.center));
+                break;
+              case LineStyle.short:
+                bytes += generator.text('-' * 20, styles: const PosStyles(align: PosAlign.center));
+                break;
+              case LineStyle.decorative:
+                bytes += generator.text('~' * 32, styles: const PosStyles(align: PosAlign.center));
+                break;
+            }
+            break;
+          case ReceiptElementType.image:
+            final file = el.value as File;
+            if (!file.existsSync()) throw 'Gambar gak ada, bro!';
+            final image = img.decodeImage(await file.readAsBytes());
+            if (image == null) throw 'Gagal decode gambar, anjir!';
+            final resized = img.copyResize(image, width: 384);
+            final mono = img.grayscale(resized);
+            final pixels = mono.getBytes();
+            final bitmap = img.Image.fromBytes(width: mono.width, height: mono.height, bytes: pixels.buffer);
+            bytes += generator.image(bitmap);
+            break;
+          case ReceiptElementType.transaction:
+          // Ganti dummy data dengan transaksi asli
+            final trans = transaction;
+            for (var item in trans['items']) {
+              final name = item['productName'].toString().padRight(18).substring(0, 18);
+              final qty = item['quantity'].toString().padLeft(4);
+              final price = item['unitPrice'].toStringAsFixed(0).padLeft(10);
+              bytes += generator.text(
+                '$name$qty$price',
+                styles: PosStyles(
+                  bold: false,
+                  height: _mapTextSize(el.textSize),
+                  width: _mapTextSize(el.textSize),
+                  align: _mapTextAlign(el.textAlign),
+                  codeTable: 'CP437',
+                ),
+              );
+            }
+            bytes += generator.text(
+              'Total: ${trans['total'].toStringAsFixed(0)}'.padLeft(32),
+              styles: PosStyles(
+                bold: true,
+                height: _mapTextSize(el.textSize),
+                width: _mapTextSize(el.textSize),
+                align: PosAlign.right,
+                codeTable: 'CP437',
+              ),
+            );
+            break;
+        }
+      }
+
+      bytes += generator.cut();
+
+      print('Printer connected: ${printerProvider.isConnected}');
+      print('Bytes length: ${bytes.length}');
+      await printerProvider.printData(bytes).timeout(const Duration(seconds: 10));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(isId ? 'Print sukses, bro! 🎉' : 'Print successful! 🎉')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(isId ? 'Gagal print: $e' : 'Failed to print: $e')),
+      );
+    }
+  }
+
   void _showTransactionDetails(BuildContext context, Map<String, dynamic> transaction) {
     final localeProvider = Provider.of<LocaleProvider>(context, listen: false);
     final currencyProvider = Provider.of<CurrencyProvider>(context, listen: false);
@@ -201,14 +357,29 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                 SizedBox(height: 16),
                 Align(
                   alignment: Alignment.centerRight,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(isId ? 'Tutup' : 'Close', style: TextStyle(fontSize: 14)),
-                    style: ElevatedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      backgroundColor: Theme.of(context).primaryColor,
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ElevatedButton(
+                        onPressed: () => _printTransaction(context, transaction),
+                        child: Text(isId ? 'Print' : 'Print', style: TextStyle(fontSize: 14)),
+                        style: ElevatedButton.styleFrom(
+                          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          backgroundColor: Colors.green,
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(isId ? 'Tutup' : 'Close', style: TextStyle(fontSize: 14)),
+                        style: ElevatedButton.styleFrom(
+                          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          backgroundColor: Theme.of(context).primaryColor,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -477,6 +648,31 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     }
   }
 
+  PosTextSize _mapTextSize(TextSize? size) {
+    switch (size) {
+      case TextSize.small:
+        return PosTextSize.size1;
+      case TextSize.medium:
+        return PosTextSize.size1;
+      case TextSize.large:
+        return PosTextSize.size2;
+      default:
+        return PosTextSize.size1;
+    }
+  }
+
+  PosAlign _mapTextAlign(ReceiptTextAlign? align) {
+    switch (align) {
+      case ReceiptTextAlign.left:
+        return PosAlign.left;
+      case ReceiptTextAlign.right:
+        return PosAlign.right;
+      case ReceiptTextAlign.center:
+      default:
+        return PosAlign.center;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final localeProvider = Provider.of<LocaleProvider>(context);
@@ -490,9 +686,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       appBar: AppBar(
         title: Text(
           isId ? 'Riwayat Transaksi' : 'Transaction History',
-          // style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
         ),
-        // backgroundColor: theme.primaryColor,
         elevation: 0,
         centerTitle: true,
         actions: [

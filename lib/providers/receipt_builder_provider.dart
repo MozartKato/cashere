@@ -1,11 +1,12 @@
-import 'package:flutter/material.dart';
 import 'dart:io';
 
-enum ReceiptElementType { text, image, qr, barcode, line, transaction }
+import 'package:flutter/material.dart';
 
+enum ReceiptElementType { text, image, qr, barcode, line, transaction }
 enum TextSize { small, medium, large }
 enum ReceiptTextAlign { left, center, right }
 enum TextFont { normal, bold, monospace }
+enum LineStyle { solid, dashed, double, patterned, short, decorative } // Tambah ini
 
 class ReceiptElement {
   ReceiptElementType type;
@@ -13,6 +14,7 @@ class ReceiptElement {
   TextSize? textSize;
   ReceiptTextAlign? textAlign;
   TextFont? textFont;
+  LineStyle? lineStyle; // Tambah ini
 
   ReceiptElement({
     required this.type,
@@ -20,6 +22,7 @@ class ReceiptElement {
     this.textSize = TextSize.medium,
     this.textAlign = ReceiptTextAlign.center,
     this.textFont = TextFont.normal,
+    this.lineStyle, // Tambah ini
   });
 }
 
@@ -48,15 +51,29 @@ class ReceiptBuilderProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void updateElementStyle(int index, {TextSize? size, ReceiptTextAlign? align, TextFont? font}) {
+  void updateElementStyle(int index, {TextSize? size, ReceiptTextAlign? align, TextFont? font, LineStyle? lineStyle}) {
     if (index < 0 || index >= _elements.length) return;
     final element = _elements[index];
     if (element.type == ReceiptElementType.text || element.type == ReceiptElementType.transaction) {
-      element.textSize = size ?? element.textSize;
-      element.textAlign = align ?? element.textAlign;
-      element.textFont = font ?? element.textFont;
-      notifyListeners();
+      _elements[index] = ReceiptElement(
+        type: element.type,
+        value: element.value,
+        textSize: size ?? element.textSize,
+        textAlign: align ?? element.textAlign,
+        textFont: font ?? element.textFont,
+        lineStyle: element.lineStyle, // Preserve lineStyle
+      );
+    } else if (element.type == ReceiptElementType.line && lineStyle != null) {
+      _elements[index] = ReceiptElement(
+        type: element.type,
+        value: element.value,
+        textSize: element.textSize,
+        textAlign: element.textAlign,
+        textFont: element.textFont,
+        lineStyle: lineStyle,
+      );
     }
+    notifyListeners();
   }
 
   void removeElement(int index) {
